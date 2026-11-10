@@ -13,5 +13,7 @@ RUN dotnet publish src/FCG.UsersAPI/FCG.UsersAPI.csproj -c Release -o /app/publi
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 COPY --from=build /app/publish .
+ENV ASPNETCORE_HTTP_PORTS=8080
+USER $APP_UID
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "FCG.UsersAPI.dll"]

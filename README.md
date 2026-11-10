@@ -1,66 +1,35 @@
-> **FIAP Cloud Games (FCG)**: este repositório faz parte do projeto, com um repositório por componente. Guia central e lista de repositórios: [fcg-orchestration](https://github.com/laviniaptrabuco/fcg-orchestration#reposit%C3%B3rios-do-projeto). Entrega da Fase 2 deste componente: [tag `fase-2`](https://github.com/laviniaptrabuco/fcg-users-api/tree/fase-2).
+# FCG Users API (Fase 4)
 
-# FCG Users API
+Microsserviço de usuários, autenticação (JWT) e perfis da FIAP Cloud Games.
+Guia central de infraestrutura, pipeline e demonstração: **fcg-orchestration** (README).
 
-Microsserviço responsável pelo cadastro, autenticação (JWT) e gerenciamento de usuários da plataforma FIAP Cloud Games.
+## Persistência poliglota
 
-## Responsabilidades
-
-- Registro e login de usuários
-- Geração de tokens JWT
-- CRUD de usuários (admin)
-- Publicação do evento `UserCreatedEvent` ao registrar um novo usuário
-
-## Tecnologias
-
-- .NET 8 / ASP.NET Core Web API
-- Entity Framework Core + SQL Server
-- MassTransit + RabbitMQ
-- BCrypt para hash de senhas
-- JWT para autenticação
-
-## Variáveis de Ambiente
-
-| Variável | Descrição | Exemplo |
+| Dado | Banco | Por quê |
 |---|---|---|
-| `ConnectionStrings__DefaultConnection` | Connection string SQL Server | `Server=sqlserver;Database=FCG_Users;...` |
-| `Jwt__Secret` | Chave secreta JWT (mínimo 32 chars) | `FCG_SUPER_SECRET_KEY...` |
-| `Jwt__Issuer` | Issuer do token JWT | `FiapCloudGames` |
-| `Jwt__Audience` | Audience do token JWT | `FiapCloudGamesUsers` |
-| `Jwt__ExpirationHours` | Expiração do token em horas | `8` |
-| `RabbitMQ__Host` | Host do RabbitMQ | `rabbitmq` |
-| `RabbitMQ__Username` | Usuário RabbitMQ | `guest` |
-| `RabbitMQ__Password` | Senha RabbitMQ | `guest` |
+| Usuários, credenciais, papéis | **SQL Server** | dados centrais, relacionais e transacionais |
+| Perfis de usuário (bio, gêneros favoritos…) | **MongoDB** (`MongoDB.Driver`) | documento flexível, esquema livre |
+| Cache de perfis (TTL 30 min) | **Redis** (`IDistributedCache`/StackExchange.Redis) | evita round-trip ao MongoDB (resposta traz `source: mongodb\|redis`) |
 
 ## Endpoints
 
-| Método | Rota | Descrição | Auth |
-|---|---|---|---|
-| POST | `/api/auth/register` | Registra novo usuário | Não |
-| POST | `/api/auth/login` | Autentica e retorna JWT | Não |
-| GET | `/api/users` | Lista todos os usuários | Admin |
-| GET | `/api/users/{id}` | Busca usuário por ID | Próprio/Admin |
-| PUT | `/api/users/{id}` | Atualiza dados do usuário | Próprio/Admin |
-| PATCH | `/api/users/{id}/password` | Altera senha | Próprio/Admin |
-| DELETE | `/api/users/{id}` | Desativa usuário | Admin |
-| PATCH | `/api/users/{id}/activate` | Ativa usuário | Admin |
-| POST | `/api/users/admin` | Cria usuário admin | Admin |
+| Método | Rota | Auth |
+|---|---|---|
+| POST | `/api/auth/register` · `/api/auth/login` | Não |
+| GET/PUT/DELETE | `/api/users`, `/api/users/{id}` | JWT (Admin p/ listar) |
+| GET/PUT | `/api/profiles/{userId}` | JWT |
+| GET | `/health` · `/metrics` | Não |
 
-## Executar localmente
+## Configuração (variáveis de ambiente — nada fixo no código)
+
+`ConnectionStrings__DefaultConnection`, `ConnectionStrings__MongoDB`, `ConnectionStrings__Redis`,
+`Jwt__Secret`, `RabbitMQ__Host/Username/Password`. Em produção vêm do ConfigMap `fcg-config` e do Secret
+`fcg-secrets` (alimentado pelo Azure Key Vault). A API **recusa subir** se faltar algum segredo.
+
+## Testes e pipeline
 
 ```bash
-cd src/FCG.UsersAPI
-dotnet run
+dotnet test tests/FCG.Users.Tests -c Release   # 24 testes: domínio, validação de senha, AuthService
 ```
 
-Swagger disponível em: `http://localhost:5000/swagger`
-
-## Criar Solution
-
-```powershell
-dotnet new sln -n FCG.UsersAPI
-dotnet sln add src/FCG.Users.Domain/FCG.Users.Domain.csproj
-dotnet sln add src/FCG.Users.Application/FCG.Users.Application.csproj
-dotnet sln add src/FCG.Users.Infrastructure/FCG.Users.Infrastructure.csproj
-dotnet sln add src/FCG.UsersAPI/FCG.UsersAPI.csproj
-```
+`.github/workflows/ci-cd.yml`: build → testes → imagem versionada → Trivy → push no ACR → deploy no AKS (Rolling Update).

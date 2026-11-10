@@ -21,13 +21,15 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<FCG.Users.Application.Services.UserService>();
 
 // MongoDB
-var mongoUri = builder.Configuration.GetConnectionString("MongoDB") ?? "mongodb://admin:admin@localhost:27017";
+var mongoUri = builder.Configuration.GetConnectionString("MongoDB")
+    ?? throw new InvalidOperationException("ConnectionStrings:MongoDB is not configured (injete via Secret).");
 var mongoClient = new MongoClient(mongoUri);
 var mongoDatabase = mongoClient.GetDatabase("fcg_db");
 builder.Services.AddSingleton(mongoDatabase);
 
 // Redis
-var redisConnection = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+var redisConnection = builder.Configuration.GetConnectionString("Redis")
+    ?? throw new InvalidOperationException("ConnectionStrings:Redis is not configured (injete via Secret).");
 var redis = ConnectionMultiplexer.Connect(redisConnection);
 builder.Services.AddSingleton(redis);
 builder.Services.AddStackExchangeRedisCache(options =>
@@ -64,8 +66,8 @@ builder.Services.AddMassTransit(x =>
     {
         cfg.Host(builder.Configuration["RabbitMQ:Host"] ?? "localhost", "/", h =>
         {
-            h.Username(builder.Configuration["RabbitMQ:Username"] ?? "guest");
-            h.Password(builder.Configuration["RabbitMQ:Password"] ?? "guest");
+            h.Username(builder.Configuration["RabbitMQ:Username"] ?? throw new InvalidOperationException("RabbitMQ:Username is not configured."));
+            h.Password(builder.Configuration["RabbitMQ:Password"] ?? throw new InvalidOperationException("RabbitMQ:Password is not configured."));
         });
         cfg.ConfigureEndpoints(context);
     });
@@ -134,6 +136,26 @@ using (var scope = app.Services.CreateScope())
             logger.LogWarning(ex, "Falha ao criar/verificar o banco (tentativa {Attempt}/{Max})", attempt, maxAttempts);
             if (attempt < maxAttempts) Thread.Sleep(5000);
         }
+    }
+}
+
+// Bootstrap do primeiro Admin (opcional): so existe Admin criado por outro Admin, entao em
+// um ambiente novo (ex.: AKS) alguem precisa nascer primeiro. A senha vem do Secret/Key Vault.
+var bootstrapEmail = builder.Configuration["Bootstrap:AdminEmail"];
+var bootstrapPassword = builder.Configuration["Bootstrap:AdminPassword"];
+if (!string.IsNullOrWhiteSpace(bootstrapEmail) && !string.IsNullOrWhiteSpace(bootstrapPassword))
+{
+    using var scope = app.Services.CreateScope();
+    var users = scope.ServiceProvider.GetRequiredService<FCG.Users.Application.Services.UserService>();
+    var log = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        await users.CreateAdminAsync(new FCG.Users.Application.DTOs.RegisterUserRequest("Administrador", bootstrapEmail, bootstrapPassword));
+        log.LogInformation("Admin inicial criado ({Email}).", bootstrapEmail);
+    }
+    catch (FCG.Users.Domain.Exceptions.DomainException ex)
+    {
+        log.LogInformation("Bootstrap do Admin ignorado: {Reason}", ex.Message);
     }
 }
 
